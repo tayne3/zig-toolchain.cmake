@@ -133,6 +133,12 @@ if(NOT CMAKE_HOST_WIN32)
   )
 endif()
 
+# unsupported linker arg: --dependency-file
+if (CMAKE_HOST_WIN32)
+	set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
+	set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
+endif()
+
 set(CMAKE_C_COMPILER "${ZIG_SHIMS_DIR}/zig-cc${EXT}")
 set(CMAKE_CXX_COMPILER "${ZIG_SHIMS_DIR}/zig-c++${EXT}")
 set(CMAKE_AR "${ZIG_SHIMS_DIR}/zig-ar${EXT}" CACHE FILEPATH "Archiver" FORCE)
