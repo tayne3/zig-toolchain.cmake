@@ -1,6 +1,6 @@
 include_guard(GLOBAL)
 
-set(ZIG_TOOLCHAIN_VERSION "0.1.1")
+set(ZIG_TOOLCHAIN_VERSION "0.1.3")
 
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
   message(FATAL_ERROR "Zig Toolchain: Visual Studio generator is not supported. Please use '-G Ninja' or '-G MinGW Makefiles'.")
@@ -11,7 +11,7 @@ if(NOT ZIG_COMPILER)
   message(FATAL_ERROR "Zig Toolchain: Zig compiler not found. Please install Zig and ensure it is in your PATH.")
 endif()
 execute_process(
-  COMMAND zig version
+  COMMAND "${ZIG_COMPILER}" version
   OUTPUT_VARIABLE ZIG_COMPILER_VERSION
   OUTPUT_STRIP_TRAILING_WHITESPACE
   RESULT_VARIABLE ZIG_VERSION_RESULT
@@ -74,8 +74,8 @@ else()
 endif()
 message(STATUS "Zig Toolchain: v${ZIG_COMPILER_VERSION} → ${ZIG_TARGET}")
 
-set(ZIG_MCPU "" CACHE STRING "Target CPU architecture")
-set(ZIG_MCPU_FEATURES "" CACHE STRING "CPU features to enable/disable")
+set(ZIG_MCPU "" CACHE STRING "Target CPU (e.g. 'baseline', 'native', 'cortex_a53'). See: zig targets")
+set(ZIG_MCPU_FEATURES "" CACHE STRING "CPU feature modifiers appended directly to -mcpu=<cpu>, e.g. '+avx2-sse4_1'. Each feature must start with + or -.")
 set(ZIG_COMPILER_FLAGS "" CACHE STRING "Additional compilation flags")
 
 set(ZIG_WRAPPER_ARGS "")
@@ -98,7 +98,7 @@ set(ZIG_CC_PREFIX "")
 if(ZIG_USE_CCACHE)
   find_program(CCACHE_TOOL ccache)
   if(CCACHE_TOOL)
-    set(ZIG_CC_PREFIX "${CCACHE_TOOL} ")
+    set(ZIG_CC_PREFIX "\"${CCACHE_TOOL}\" ")
     message(STATUS "Zig Toolchain: ccache enabled at ${CCACHE_TOOL}")
   else()
     message(WARNING "Zig Toolchain: ZIG_USE_CCACHE is ON but 'ccache' was not found in PATH.")
@@ -118,31 +118,31 @@ else()
   set(ARGS "\"$@\"")
 endif()
 
-file(WRITE "${ZIG_SHIMS_DIR}/zig-cc${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}zig cc -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-c++${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}zig c++ -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-ar${EXT}" "${HEADER}\nzig ar ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-rc${EXT}" "${HEADER}\nzig rc ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}" "${HEADER}\nzig ranlib ${ARGS}\n")
+file(WRITE "${ZIG_SHIMS_DIR}/zig-cc${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}\"${ZIG_COMPILER}\" cc -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
+file(WRITE "${ZIG_SHIMS_DIR}/zig-c++${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}\"${ZIG_COMPILER}\" c++ -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
+file(WRITE "${ZIG_SHIMS_DIR}/zig-ar${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" ar ${ARGS}\n")
+file(WRITE "${ZIG_SHIMS_DIR}/zig-rc${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" rc ${ARGS}\n")
+file(WRITE "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" ranlib ${ARGS}\n")
 if(NOT CMAKE_HOST_WIN32)
   execute_process(COMMAND chmod +x 
-    "${ZIG_SHIMS_DIR}/zig-cc" 
-    "${ZIG_SHIMS_DIR}/zig-c++"
-    "${ZIG_SHIMS_DIR}/zig-ar"
-    "${ZIG_SHIMS_DIR}/zig-rc"
-    "${ZIG_SHIMS_DIR}/zig-ranlib"
+    "${ZIG_SHIMS_DIR}/zig-cc${EXT}" 
+    "${ZIG_SHIMS_DIR}/zig-c++${EXT}"
+    "${ZIG_SHIMS_DIR}/zig-ar${EXT}"
+    "${ZIG_SHIMS_DIR}/zig-rc${EXT}"
+    "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}"
   )
-endif()
-
-# unsupported linker arg: --dependency-file
-if (CMAKE_HOST_WIN32)
-	set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
-	set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
 endif()
 
 set(CMAKE_C_COMPILER "${ZIG_SHIMS_DIR}/zig-cc${EXT}")
 set(CMAKE_CXX_COMPILER "${ZIG_SHIMS_DIR}/zig-c++${EXT}")
 set(CMAKE_AR "${ZIG_SHIMS_DIR}/zig-ar${EXT}" CACHE FILEPATH "Archiver" FORCE)
 set(CMAKE_RANLIB "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}" CACHE FILEPATH "Ranlib" FORCE)
+
+if(CMAKE_HOST_WIN32)
+  # unsupported linker arg: --dependency-file
+	set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
+	set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
+endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
   set(CMAKE_RC_COMPILER "${ZIG_SHIMS_DIR}/zig-rc${EXT}" CACHE FILEPATH "Resource Compiler" FORCE)
