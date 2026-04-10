@@ -106,6 +106,7 @@ if(ZIG_COMPILER_FLAGS)
 endif()
 
 set(_ZIG_COMPILER_INJECTED_FLAGS "-target" "${ZIG_TARGET}" ${_ZIG_EXTRA_FLAGS_LIST})
+list(LENGTH _ZIG_COMPILER_INJECTED_FLAGS _ZIG_INJECT_COUNT)
 set(_ZIG_INJECTED_C_CODE "")
 foreach(_arg IN LISTS _ZIG_COMPILER_INJECTED_FLAGS)
   string(REPLACE "\\" "\\\\" _arg_escaped "${_arg}")
@@ -137,8 +138,10 @@ function(generate_shim_binary TOOL_NAME ZIG_SUBCOMMAND INJECT_FLAGS USE_CCACHE)
 
   if(${INJECT_FLAGS})
     set(WRAPPER_INJECT_CODE "${_ZIG_INJECTED_C_CODE}")
+    set(WRAPPER_INJECT_COUNT ${_ZIG_INJECT_COUNT})
   else()
     set(WRAPPER_INJECT_CODE "")
+    set(WRAPPER_INJECT_COUNT 0)
   endif()
   
   if(${USE_CCACHE} AND _ZIG_CCACHE_EXE)
@@ -159,15 +162,15 @@ function(generate_shim_binary TOOL_NAME ZIG_SUBCOMMAND INJECT_FLAGS USE_CCACHE)
 #include <unistd.h>
 #endif
 
-#define ZIG_EXE    \"${_ZIG_COMPILER_EXE}\"
-#define ZIG_CMD    \"${ZIG_SUBCOMMAND}\"
-#define CCACHE_EXE \"${_ZIG_CCACHE_EXE}\"
-#define USE_CCACHE ${WRAPPER_USE_CCACHE}
+#define ZIG_EXE      \"${_ZIG_COMPILER_EXE}\"
+#define ZIG_CMD      \"${ZIG_SUBCOMMAND}\"
+#define CCACHE_EXE   \"${_ZIG_CCACHE_EXE}\"
+#define USE_CCACHE   ${WRAPPER_USE_CCACHE}
+#define INJECT_COUNT ${WRAPPER_INJECT_COUNT}
 
 int main(int argc, char** argv) {
   const char*  ijlist[] = {${WRAPPER_INJECT_CODE} NULL};
-  const int    ijcount  = (int)(sizeof(ijlist) / sizeof(char*)) - 1;
-  const int    exargc   = USE_CCACHE + 2 + ijcount + (argc - 1);
+  const int    exargc   = USE_CCACHE + 2 + INJECT_COUNT + (argc - 1);
   const char** exargv   = (const char**)malloc(sizeof(char*) * (size_t)(exargc + 1));
 
   if (!exargv) {
@@ -179,7 +182,7 @@ int main(int argc, char** argv) {
   if (USE_CCACHE) { *p++ = CCACHE_EXE; }
   *p++ = ZIG_EXE;
   *p++ = ZIG_CMD;
-  for (int i = 0; i < ijcount; ++i) { *p++ = ijlist[i]; }
+  for (int i = 0; i < INJECT_COUNT; ++i) { *p++ = ijlist[i]; }
   for (int i = 1; i < argc; ++i) { *p++ = argv[i]; }
   *p = NULL;
 
