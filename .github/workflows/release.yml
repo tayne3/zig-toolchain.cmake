@@ -90,7 +90,7 @@ jobs:
 
           \`\`\`bash
           # Download directly to your project
-          curl -o zig.toolchain.cmake https://github.com/tayne3/zig.toolchain.cmake/releases/download/$TAG/zig.toolchain.cmake
+          curl -o zig-toolchain.cmake https://github.com/tayne3/zig-toolchain.cmake/releases/download/$TAG/zig-toolchain.cmake
           \`\`\`
 
           ## 📝 Usage
@@ -98,7 +98,7 @@ jobs:
           \`\`\`bash
           # Cross-compile for Linux ARM64
           cmake -S . -B build -G Ninja \\
-            -DCMAKE_TOOLCHAIN_FILE=zig.toolchain.cmake \\
+            -DCMAKE_TOOLCHAIN_FILE=zig-toolchain.cmake \\
             -DCMAKE_SYSTEM_NAME=Linux \\
             -DCMAKE_SYSTEM_PROCESSOR=aarch64
 
@@ -108,7 +108,7 @@ jobs:
           ## 📚 Documentation
 
           EOF
-          echo "For complete usage instructions and examples, see the [README](https://github.com/tayne3/zig.toolchain.cmake#readme)." >> release_notes.md
+          echo "For complete usage instructions and examples, see the [README](https://github.com/tayne3/zig-toolchain.cmake#readme)." >> release_notes.md
           echo "Generated release notes:"
           cat release_notes.md
 
@@ -124,14 +124,14 @@ jobs:
           draft: false
           prerelease: ${{ steps.version.outputs.is_prerelease }}
 
-      - name: Upload zig.toolchain.cmake
+      - name: Upload zig-toolchain.cmake
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: zig.toolchain.cmake
-          asset_name: zig.toolchain.cmake
+          asset_path: zig-toolchain.cmake
+          asset_name: zig-toolchain.cmake
           asset_content_type: text/plain
 
   update-badges:
@@ -145,7 +145,7 @@ jobs:
       - name: Update release badge cache
         run: |
           # Trigger shield.io cache refresh for release badge
-          curl -X POST "https://img.shields.io/github/v/release/tayne3/zig.toolchain.cmake?include_prereleases&label=release&logo=github&logoColor=white"
+          curl -X POST "https://img.shields.io/github/v/release/tayne3/zig-toolchain.cmake?include_prereleases&label=release&logo=github&logoColor=white"
           echo "🔄 Badge cache refresh triggered"
 
   notify-success:
@@ -158,6 +158,6 @@ jobs:
     steps:
       - name: Success notification
         run: |
-          echo "🎉 Successfully released zig.toolchain.cmake ${{ needs.create-release.outputs.version }}"
-          echo "📦 Download URL: https://github.com/tayne3/zig.toolchain.cmake/releases/download/${{ needs.create-release.outputs.tag }}/zig.toolchain.cmake"
-          echo "🔗 Release page: https://github.com/tayne3/zig.toolchain.cmake/releases/tag/${{ needs.create-release.outputs.tag }}"
+          echo "🎉 Successfully released zig-toolchain.cmake ${{ needs.create-release.outputs.version }}"
+          echo "📦 Download URL: https://github.com/tayne3/zig-toolchain.cmake/releases/download/${{ needs.create-release.outputs.tag }}/zig-toolchain.cmake"
+          echo "🔗 Release page: https://github.com/tayne3/zig-toolchain.cmake/releases/tag/${{ needs.create-release.outputs.tag }}"

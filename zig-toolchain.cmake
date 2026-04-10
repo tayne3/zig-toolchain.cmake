@@ -1,6 +1,6 @@
 include_guard(GLOBAL)
 
-set(ZIG_TOOLCHAIN_VERSION "0.1.3")
+set(ZIG_TOOLCHAIN_VERSION "0.2.0")
 
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
   message(FATAL_ERROR "Zig Toolchain: Visual Studio generator is not supported. Please use '-G Ninja' or '-G MinGW Makefiles'.")

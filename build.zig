@@ -75,7 +75,7 @@ fn run_test(b: *std.Build, t: Target, use_ccache: bool) !void {
     const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
     defer allocator.free(cwd);
 
-    const toolchain_path = try std.fs.path.join(allocator, &.{ cwd, "zig.toolchain.cmake" });
+    const toolchain_path = try std.fs.path.join(allocator, &.{ cwd, "zig-toolchain.cmake" });
     const dir_suffix = if (use_ccache) "-with-ccache" else "";
     const dir_name = b.fmt("{s}{s}", .{ t.target, dir_suffix });
     const build_dir = try std.fs.path.join(allocator, &.{ cwd, "build", dir_name });
