@@ -62,22 +62,28 @@ jobs:
         with:
           cmake-version: "3.25"
 
-      - name: Set up Ninja (Ubuntu)
+      - name: Set up Build Tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build ccache
 
-      - name: Set up Ninja (Windows)
+      - name: Set up Build Tools (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install ninja
+          choco install -y ninja ccache
+
+      - name: Set up Build Tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja ccache
 
       - name: System information
         run: |
           zig version
           cmake --version
           ninja --version
+          ccache --version
 
       - name: Run tests
         run: |
