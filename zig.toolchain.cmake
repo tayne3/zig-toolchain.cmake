@@ -10,6 +10,8 @@ find_program(ZIG_COMPILER zig)
 if(NOT ZIG_COMPILER)
   message(FATAL_ERROR "Zig Toolchain: Zig compiler not found. Please install Zig and ensure it is in your PATH.")
 endif()
+string(REPLACE "\\" "\\\\" _ZIG_COMPILER_EXE "${ZIG_COMPILER}")
+
 execute_process(
   COMMAND "${ZIG_COMPILER}" version
   OUTPUT_VARIABLE ZIG_COMPILER_VERSION
@@ -48,21 +50,18 @@ if(NOT ZIG_TARGET)
 
   set(ZIG_TARGET "${ZIG_ARCH}-${ZIG_OS}-${ZIG_ABI}")
 else()
-  if(NOT ZIG_TARGET MATCHES "^([a-zA-Z0-9_]+)-([a-zA-Z0-9_]+)(-([a-zA-Z0-9_.]+))?$")
-    message(FATAL_ERROR "Zig Toolchain: ZIG_TARGET is invalid. Please specify it manually using -DZIG_TARGET=<arch>-<os>[-<abi>]")
+  if(NOT ZIG_TARGET MATCHES "^([^-]+)-([^-]+)(-(.+))?$")
+    message(FATAL_ERROR "Zig Toolchain: ZIG_TARGET '${ZIG_TARGET}' is invalid. Expected format: <arch>-<os>[-<abi>]")
   endif()
   set(ZIG_ARCH ${CMAKE_MATCH_1})
   set(ZIG_OS ${CMAKE_MATCH_2})
-  if(CMAKE_MATCH_4)
-    set(ZIG_ABI ${CMAKE_MATCH_4})
-  else()
-    set(ZIG_ABI "none")
-  endif()
 endif()
 
 # Dummy version satisfies CMake's cross-compilation requirements without affecting Zig's behavior
 set(CMAKE_SYSTEM_VERSION 1)
 set(CMAKE_SYSTEM_PROCESSOR ${ZIG_ARCH})
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
 if(ZIG_OS STREQUAL "linux")
   set(CMAKE_SYSTEM_NAME "Linux")
 elseif(ZIG_OS STREQUAL "windows")
@@ -70,82 +69,188 @@ elseif(ZIG_OS STREQUAL "windows")
 elseif(ZIG_OS STREQUAL "macos")
   set(CMAKE_SYSTEM_NAME "Darwin")
 else()
-  message(FATAL_ERROR "Unknown OS: ${ZIG_OS}")
+  set(CMAKE_SYSTEM_NAME ${ZIG_OS})
+  message(WARNING "Unknown OS: ${ZIG_OS}")
 endif()
 message(STATUS "Zig Toolchain: v${ZIG_COMPILER_VERSION} → ${ZIG_TARGET}")
+
+option(ZIG_USE_CCACHE "Enable ccache optimization for Zig toolchain" OFF)
+if(ZIG_USE_CCACHE)
+  find_program(ZIG_CCACHE_EXECUTABLE ccache)
+  if(ZIG_CCACHE_EXECUTABLE)
+    message(STATUS "Zig Toolchain: ccache enabled at ${ZIG_CCACHE_EXECUTABLE}")
+  else()
+    message(WARNING "Zig Toolchain: ZIG_USE_CCACHE is ON but 'ccache' was not found in PATH.")
+  endif()
+endif()
+if(ZIG_USE_CCACHE AND ZIG_CCACHE_EXECUTABLE)
+  string(REPLACE "\\" "\\\\" _ZIG_CCACHE_EXE "${ZIG_CCACHE_EXECUTABLE}")
+else()
+  set(_ZIG_CCACHE_EXE "")
+endif()
 
 set(ZIG_MCPU "" CACHE STRING "Target CPU (e.g. 'baseline', 'native', 'cortex_a53'). See: zig targets")
 set(ZIG_MCPU_FEATURES "" CACHE STRING "CPU feature modifiers appended directly to -mcpu=<cpu>, e.g. '+avx2-sse4_1'. Each feature must start with + or -.")
 set(ZIG_COMPILER_FLAGS "" CACHE STRING "Additional compilation flags")
 
-set(ZIG_WRAPPER_ARGS "")
+if(ZIG_MCPU_FEATURES AND NOT ZIG_MCPU)
+  message(WARNING "Zig Toolchain: ZIG_MCPU_FEATURES='${ZIG_MCPU_FEATURES}' is set but ZIG_MCPU is empty.")
+endif()
+set(_ZIG_EXTRA_FLAGS_LIST "")
 if(ZIG_MCPU)
-  string(APPEND ZIG_WRAPPER_ARGS " -mcpu=${ZIG_MCPU}")
-  if(ZIG_MCPU_FEATURES)
-    string(APPEND ZIG_WRAPPER_ARGS "${ZIG_MCPU_FEATURES}")
-  endif()
+  list(APPEND _ZIG_EXTRA_FLAGS_LIST "-mcpu=${ZIG_MCPU}${ZIG_MCPU_FEATURES}")
 endif()
 if(ZIG_COMPILER_FLAGS)
-  string(APPEND ZIG_WRAPPER_ARGS " ${ZIG_COMPILER_FLAGS}")
-endif()
-string(STRIP "${ZIG_WRAPPER_ARGS}" ZIG_WRAPPER_ARGS)
-if(ZIG_WRAPPER_ARGS)
-  message(STATUS "Zig Toolchain: Compiler flags → ${ZIG_WRAPPER_ARGS}")
+  separate_arguments(_ZIG_COMPILER_FLAGS NATIVE_COMMAND "${ZIG_COMPILER_FLAGS}")
+  list(APPEND _ZIG_EXTRA_FLAGS_LIST ${_ZIG_COMPILER_FLAGS})
 endif()
 
-option(ZIG_USE_CCACHE "Enable ccache optimization for Zig toolchain" OFF)
-set(ZIG_CC_PREFIX "")
-if(ZIG_USE_CCACHE)
-  find_program(CCACHE_TOOL ccache)
-  if(CCACHE_TOOL)
-    set(ZIG_CC_PREFIX "\"${CCACHE_TOOL}\" ")
-    message(STATUS "Zig Toolchain: ccache enabled at ${CCACHE_TOOL}")
-  else()
-    message(WARNING "Zig Toolchain: ZIG_USE_CCACHE is ON but 'ccache' was not found in PATH.")
-  endif()
+set(_ZIG_COMPILER_INJECTED_FLAGS "-target" "${ZIG_TARGET}" ${_ZIG_EXTRA_FLAGS_LIST})
+set(_ZIG_INJECTED_C_CODE "")
+foreach(_arg IN LISTS _ZIG_COMPILER_INJECTED_FLAGS)
+  string(REPLACE "\\" "\\\\" _arg_escaped "${_arg}")
+  string(REPLACE "\"" "\\\"" _arg_escaped "${_arg_escaped}")
+  string(APPEND _ZIG_INJECTED_C_CODE "\"${_arg_escaped}\", ")
+endforeach()
+
+if(CMAKE_HOST_WIN32)
+  set(_ZIG_WRAPPER_EXT ".exe")
+  set(_ZIG_IS_WIN32 1)
+else()
+  set(_ZIG_WRAPPER_EXT "")
+  set(_ZIG_IS_WIN32 0)
 endif()
 
-# Generate wrapper scripts to inject -target flag and ccache prefix transparently
+if(CMAKE_HOST_APPLE)
+  set(_ZIG_SHIM_STRIP_FLAG "")
+else()
+  set(_ZIG_SHIM_STRIP_FLAG "-s")
+endif()
+
 set(ZIG_SHIMS_DIR "${CMAKE_BINARY_DIR}/.zig-shims")
 file(MAKE_DIRECTORY "${ZIG_SHIMS_DIR}")
-if(CMAKE_HOST_WIN32)
-  set(EXT ".cmd")
-  set(HEADER "@echo off")
-  set(ARGS "%*")
-else()
-  set(EXT "")
-  set(HEADER "#!/bin/sh")
-  set(ARGS "\"$@\"")
-endif()
 
-file(WRITE "${ZIG_SHIMS_DIR}/zig-cc${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}\"${ZIG_COMPILER}\" cc -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-c++${EXT}" "${HEADER}\n${ZIG_CC_PREFIX}\"${ZIG_COMPILER}\" c++ -target ${ZIG_TARGET} ${ZIG_WRAPPER_ARGS} ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-ar${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" ar ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-rc${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" rc ${ARGS}\n")
-file(WRITE "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}" "${HEADER}\n\"${ZIG_COMPILER}\" ranlib ${ARGS}\n")
-if(NOT CMAKE_HOST_WIN32)
-  execute_process(COMMAND chmod +x 
-    "${ZIG_SHIMS_DIR}/zig-cc${EXT}" 
-    "${ZIG_SHIMS_DIR}/zig-c++${EXT}"
-    "${ZIG_SHIMS_DIR}/zig-ar${EXT}"
-    "${ZIG_SHIMS_DIR}/zig-rc${EXT}"
-    "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}"
+function(generate_shim_binary TOOL_NAME ZIG_SUBCOMMAND INJECT_FLAGS USE_CCACHE)
+  set(WRAPPER_SOURCE "${ZIG_SHIMS_DIR}/${TOOL_NAME}.c")
+  set(WRAPPER_EXE    "${ZIG_SHIMS_DIR}/${TOOL_NAME}${_ZIG_WRAPPER_EXT}")
+  set(WRAPPER_HASH   "${ZIG_SHIMS_DIR}/${TOOL_NAME}.hash")
+
+  if(${INJECT_FLAGS})
+    set(WRAPPER_INJECT_CODE "${_ZIG_INJECTED_C_CODE}")
+  else()
+    set(WRAPPER_INJECT_CODE "")
+  endif()
+  
+  if(${USE_CCACHE} AND _ZIG_CCACHE_EXE)
+    set(WRAPPER_USE_CCACHE 1)
+  else()
+    set(WRAPPER_USE_CCACHE 0)
+  endif()
+
+  set(C_CODE_CONTENT "
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#if ${_ZIG_IS_WIN32}
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
+#define ZIG_EXE    \"${_ZIG_COMPILER_EXE}\"
+#define ZIG_CMD    \"${ZIG_SUBCOMMAND}\"
+#define CCACHE_EXE \"${_ZIG_CCACHE_EXE}\"
+#define USE_CCACHE ${WRAPPER_USE_CCACHE}
+
+int main(int argc, char** argv) {
+  const char*  ijlist[] = {${WRAPPER_INJECT_CODE} NULL};
+  const int    ijcount  = (int)(sizeof(ijlist) / sizeof(char*)) - 1;
+  const int    exargc   = USE_CCACHE + 2 + ijcount + (argc - 1);
+  const char** exargv   = (const char**)malloc(sizeof(char*) * (size_t)(exargc + 1));
+
+  if (!exargv) {
+    fprintf(stderr, \"malloc failed\\n\");
+    return 1;
+  }
+
+  const char **p = exargv;
+  if (USE_CCACHE) { *p++ = CCACHE_EXE; }
+  *p++ = ZIG_EXE;
+  *p++ = ZIG_CMD;
+  for (int i = 0; i < ijcount; ++i) { *p++ = ijlist[i]; }
+  for (int i = 1; i < argc; ++i) { *p++ = argv[i]; }
+  *p = NULL;
+
+  #if ${_ZIG_IS_WIN32}
+    intptr_t ret = _spawnvp(_P_WAIT, exargv[0], (const char* const*)exargv);
+    free(exargv);
+    return (int)ret;
+  #else
+    execvp(exargv[0], (char* const*)exargv);
+    perror(\"execvp failed\");
+    free(exargv);
+    return 1;
+  #endif
+}")
+
+  string(MD5 _new_hash "${C_CODE_CONTENT}")
+  if(EXISTS "${WRAPPER_HASH}" AND EXISTS "${WRAPPER_EXE}")
+    file(READ "${WRAPPER_HASH}" _old_hash)
+    string(STRIP "${_old_hash}" _old_hash)
+    if(_old_hash STREQUAL _new_hash)
+      return()
+    endif()
+  endif()
+
+  file(WRITE "${WRAPPER_SOURCE}" "${C_CODE_CONTENT}")
+  message(STATUS "Zig Toolchain: Compiling native wrapper for '${TOOL_NAME}'...")
+
+  execute_process(
+    COMMAND "${ZIG_COMPILER}" cc -O2 ${_ZIG_SHIM_STRIP_FLAG} "${WRAPPER_SOURCE}" -o "${WRAPPER_EXE}"
+    RESULT_VARIABLE COMPILE_RESULT
+    ERROR_VARIABLE  COMPILE_STDERR
+    OUTPUT_QUIET
   )
-endif()
+  if(NOT COMPILE_RESULT EQUAL 0)
+    message(FATAL_ERROR
+      "Zig Toolchain: Failed to compile wrapper executable for '${TOOL_NAME}'.\n"
+      "${COMPILE_STDERR}")
+  endif()
 
-set(CMAKE_C_COMPILER "${ZIG_SHIMS_DIR}/zig-cc${EXT}")
-set(CMAKE_CXX_COMPILER "${ZIG_SHIMS_DIR}/zig-c++${EXT}")
-set(CMAKE_AR "${ZIG_SHIMS_DIR}/zig-ar${EXT}" CACHE FILEPATH "Archiver" FORCE)
-set(CMAKE_RANLIB "${ZIG_SHIMS_DIR}/zig-ranlib${EXT}" CACHE FILEPATH "Ranlib" FORCE)
+  if(NOT CMAKE_HOST_WIN32)
+    execute_process(COMMAND chmod +x "${WRAPPER_EXE}" OUTPUT_QUIET)
+  endif()
+
+  file(WRITE "${WRAPPER_HASH}" "${_new_hash}")
+endfunction()
+
+generate_shim_binary("zig-cc"      "cc"      TRUE TRUE)
+generate_shim_binary("zig-c++"     "c++"     TRUE TRUE)
+generate_shim_binary("zig-ar"      "ar"      FALSE FALSE)
+generate_shim_binary("zig-rc"      "rc"      FALSE FALSE)
+generate_shim_binary("zig-ranlib"  "ranlib"  FALSE FALSE)
+generate_shim_binary("zig-nm"      "nm"      FALSE FALSE)
+generate_shim_binary("zig-objcopy" "objcopy" FALSE FALSE)
+generate_shim_binary("zig-strip"   "strip"   FALSE FALSE)
+
+set(CMAKE_C_COMPILER   "${ZIG_SHIMS_DIR}/zig-cc${_ZIG_WRAPPER_EXT}")
+set(CMAKE_CXX_COMPILER "${ZIG_SHIMS_DIR}/zig-c++${_ZIG_WRAPPER_EXT}")
+set(CMAKE_AR           "${ZIG_SHIMS_DIR}/zig-ar${_ZIG_WRAPPER_EXT}"      CACHE FILEPATH "Archiver" FORCE)
+set(CMAKE_RANLIB       "${ZIG_SHIMS_DIR}/zig-ranlib${_ZIG_WRAPPER_EXT}"  CACHE FILEPATH "Ranlib" FORCE)
+set(CMAKE_NM           "${ZIG_SHIMS_DIR}/zig-nm${_ZIG_WRAPPER_EXT}"      CACHE FILEPATH "NM" FORCE)
+set(CMAKE_OBJCOPY      "${ZIG_SHIMS_DIR}/zig-objcopy${_ZIG_WRAPPER_EXT}" CACHE FILEPATH "Objcopy" FORCE)
+set(CMAKE_STRIP        "${ZIG_SHIMS_DIR}/zig-strip${_ZIG_WRAPPER_EXT}"   CACHE FILEPATH "Strip" FORCE)
 
 if(CMAKE_HOST_WIN32)
-  # unsupported linker arg: --dependency-file
-	set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
-	set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
+  # unsupported linker arg: --dependency-file. see https://github.com/ziglang/zig/issues/22213
+  set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
+  set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-  set(CMAKE_RC_COMPILER "${ZIG_SHIMS_DIR}/zig-rc${EXT}" CACHE FILEPATH "Resource Compiler" FORCE)
+  set(CMAKE_RC_COMPILER "${ZIG_SHIMS_DIR}/zig-rc${_ZIG_WRAPPER_EXT}" CACHE FILEPATH "Resource Compiler" FORCE)
   # Explicitly specify MSVC syntax because zig rc only supports this format
   set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> /fo <OBJECT> <SOURCE>")
 elseif(CMAKE_SYSTEM_NAME MATCHES "Darwin")
