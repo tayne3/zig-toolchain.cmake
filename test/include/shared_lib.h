@@ -26,8 +26,8 @@ EXPORT int add(int a, int b);
 namespace shared_lib {
 
 class EXPORT SharedLib {
- public:
-  static int add(int a, int b);
+public:
+    static int add(int a, int b);
 };
 
 };  // namespace shared_lib

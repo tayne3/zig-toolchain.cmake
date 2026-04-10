@@ -16,8 +16,8 @@ int sub(int a, int b);
 namespace static_lib {
 
 class StaticLib {
- public:
-  static int sub(int a, int b);
+public:
+    static int sub(int a, int b);
 };
 
 };  // namespace static_lib
