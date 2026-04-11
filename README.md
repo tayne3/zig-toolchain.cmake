@@ -25,7 +25,7 @@ A lightweight CMake toolchain file that enables cross-compilation of C/C++ proje
 Download `zig-toolchain.cmake` to your project root or a `cmake/` subdirectory.
 
 ```bash
-curl -o zig-toolchain.cmake https://github.com/tayne3/zig-toolchain.cmake/releases/download/v0.2.0/zig-toolchain.cmake
+curl -o zig-toolchain.cmake https://github.com/tayne3/zig-toolchain.cmake/releases/download/v0.2.1/zig-toolchain.cmake
 ```
 
 **Cross-Compilation**:
