@@ -1,5 +1,5 @@
 # ==============================================================================
-# zig-toolchain.cmake v0.2.1
+# zig-toolchain.cmake v0.2.2
 #
 # Copyright (c) 2025 tayne3
 # Licensed under the MIT License.
@@ -7,8 +7,8 @@
 include_guard(GLOBAL)
 
 option(ZIG_USE_CCACHE "Enable ccache optimization for Zig toolchain" OFF)
-set(ZIG_MCPU "" CACHE STRING "Target CPU (e.g. 'baseline', 'native', 'cortex_a53'). See: zig targets")
-set(ZIG_MCPU_FEATURES "" CACHE STRING "CPU feature modifiers appended directly to -mcpu=<cpu>, e.g. '+avx2-sse4_1'")
+set(ZIG_MCPU          ""  CACHE STRING "Target CPU (e.g. 'baseline', 'native', 'cortex_a53'). See: zig targets")
+set(ZIG_MCPU_FEATURES ""  CACHE STRING "CPU feature modifiers appended directly to -mcpu=<cpu>, e.g. '+avx2-sse4_1'")
 set(ZIG_COMPILER_FLAGS "" CACHE STRING "Additional compilation flags")
 
 if(ZIG_MCPU_FEATURES AND NOT ZIG_MCPU)
@@ -32,7 +32,32 @@ execute_process(
   RESULT_VARIABLE _zig_version_result
 )
 if(NOT _zig_version_result EQUAL 0)
-  message(FATAL_ERROR "Zig Toolchain: Zig compiler found but failed to get version.")
+  message(FATAL_ERROR "Zig Toolchain: Zig compiler found at '${_zig_compiler_exe}' but failed to retrieve its version.")
+endif()
+
+# Parse version string into components for version-gated logic
+# Handles both release ("0.16.0") and dev ("0.16.0-dev.1484+d0ba6642b") formats
+if(ZIG_COMPILER_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+  set(ZIG_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(ZIG_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(ZIG_VERSION_PATCH "${CMAKE_MATCH_3}")
+else()
+  message(WARNING "Zig Toolchain: Could not parse version '${ZIG_COMPILER_VERSION}'. Proceeding anyway.")
+  set(ZIG_VERSION_MAJOR 0)
+  set(ZIG_VERSION_MINOR 0)
+  set(ZIG_VERSION_PATCH 0)
+endif()
+# Capture optional pre-release/dev suffix (e.g. "dev.1484+d0ba6642b")
+if(ZIG_COMPILER_VERSION MATCHES "-(.+)$")
+  set(ZIG_VERSION_DEV "${CMAKE_MATCH_1}")
+else()
+  set(ZIG_VERSION_DEV "")
+endif()
+
+if(ZIG_COMPILER_VERSION VERSION_LESS "0.15.0")
+  message(WARNING
+    "Zig Toolchain: Zig ${ZIG_COMPILER_VERSION} predates the recommended minimum (0.15.0). "
+    "Toolchain behaviour is untested on this version.")
 endif()
 
 unset(_zig_ccache_exe CACHE)
@@ -52,37 +77,34 @@ if(NOT ZIG_TARGET)
   if(NOT CMAKE_SYSTEM_PROCESSOR)
     set(CMAKE_SYSTEM_PROCESSOR "${CMAKE_HOST_SYSTEM_PROCESSOR}")
   endif()
-
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" ZIG_ARCH)
   if(ZIG_ARCH MATCHES "arm64|aarch64")
     set(ZIG_ARCH "aarch64")
   elseif(ZIG_ARCH MATCHES "x64|x86_64|amd64")
     set(ZIG_ARCH "x86_64")
   endif()
-
   string(TOLOWER "${CMAKE_SYSTEM_NAME}" ZIG_OS)
   set(ZIG_ABI "gnu")
   if(ZIG_OS MATCHES "darwin|macos")
-    set(ZIG_OS "macos")
+    set(ZIG_OS  "macos")
     set(ZIG_ABI "none") # macOS uses its own ABI, not GNU
   elseif(ZIG_OS MATCHES "windows")
     set(ZIG_OS "windows")
   elseif(ZIG_OS MATCHES "linux")
     set(ZIG_OS "linux")
   endif()
-
   set(ZIG_TARGET "${ZIG_ARCH}-${ZIG_OS}-${ZIG_ABI}")
 else()
   if(NOT ZIG_TARGET MATCHES "^([^-]+)-([^-]+)(-(.+))?$")
     message(FATAL_ERROR "Zig Toolchain: ZIG_TARGET '${ZIG_TARGET}' is invalid. Expected format: <arch>-<os>[-<abi>]")
   endif()
-  set(ZIG_ARCH ${CMAKE_MATCH_1})
-  set(ZIG_OS ${CMAKE_MATCH_2})
+  set(ZIG_ARCH "${CMAKE_MATCH_1}")
+  set(ZIG_OS   "${CMAKE_MATCH_2}")
 endif()
 
-# Dummy version satisfies CMake's cross-compilation requirements without affecting Zig's behavior
-set(CMAKE_SYSTEM_VERSION 1)
-set(CMAKE_SYSTEM_PROCESSOR ${ZIG_ARCH})
+# Dummy version satisfies CMake's cross-compilation requirements without affecting Zig's behaviour
+set(CMAKE_SYSTEM_VERSION   1)
+set(CMAKE_SYSTEM_PROCESSOR "${ZIG_ARCH}")
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 if(ZIG_OS STREQUAL "linux")
@@ -92,8 +114,8 @@ elseif(ZIG_OS STREQUAL "windows")
 elseif(ZIG_OS STREQUAL "macos")
   set(CMAKE_SYSTEM_NAME "Darwin")
 else()
-  set(CMAKE_SYSTEM_NAME ${ZIG_OS})
-  message(WARNING "Unknown OS: ${ZIG_OS}")
+  set(CMAKE_SYSTEM_NAME "${ZIG_OS}")
+  message(WARNING "Zig Toolchain: Unknown target OS '${ZIG_OS}'; CMAKE_SYSTEM_NAME set verbatim.")
 endif()
 
 message(STATUS "Zig Toolchain: v${ZIG_COMPILER_VERSION} → ${ZIG_TARGET}")
@@ -110,27 +132,25 @@ endif()
 
 if(CMAKE_HOST_WIN32)
   set(_zig_wrapper_ext ".exe")
-  set(_zig_host_win32 1)
+  set(_zig_host_win32  1)
 else()
   set(_zig_wrapper_ext "")
-  set(_zig_host_win32 0)
+  set(_zig_host_win32  0)
 endif()
 
 set(_zig_shims_dir "${CMAKE_BINARY_DIR}/.zig-shims")
 file(MAKE_DIRECTORY "${_zig_shims_dir}")
 
-# Use Bracket Argument [=[ ... ]=] to avoid escaping hell
+# Use bracket argument [=[ ... ]=] to avoid escaping hell
 set(_zig_shim_template [=[
 // @_zig_tool_name@ wrapper for Zig toolchain
 #include <stdio.h>
 #include <stdlib.h>
-
 #if @_zig_host_win32@
 #include <process.h>
 #else
 #include <unistd.h>
 #endif
-
 int main(int argc, char** argv) {
   // User args (argc - 1) + NULL terminator (1) + Injected args count
   const char* exargv[argc + @_zig_extra_args_count@];
@@ -141,7 +161,6 @@ int main(int argc, char** argv) {
 @_zig_flags_stmts@
   for (int i = 1; i < argc; ++i) { *p++ = argv[i]; }
   *p = NULL;
-
 #if @_zig_host_win32@
   return (int)_spawnvp(_P_WAIT, exargv[0], (const char* const*)exargv);
 #else
@@ -153,25 +172,25 @@ int main(int argc, char** argv) {
 ]=])
 
 function(_zig_generate_shim tool_name subcommand inject_flags use_ccache)
-  set(_zig_tool_name "${tool_name}")
+  set(_zig_tool_name  "${tool_name}")
   set(_zig_subcommand "${subcommand}")
 
-  # 2 injected args baseline: zig executable + subcommand
-  set(_zig_extra_args_count 2) 
+  # 2 baseline injected args: zig executable + subcommand
+  set(_zig_extra_args_count 2)
   set(_zig_ccache_stmt "")
   set(_zig_flags_stmts "")
 
-  # Escape executable paths for C string literal
+  # Escape executable path for C string literal
   string(REPLACE "\\" "\\\\" _zig_compiler_exe_escaped "${_zig_compiler_exe}")
 
-  # Process ccache injection
+  # Inject ccache prefix if requested
   if(use_ccache AND _zig_ccache_exe)
     string(REPLACE "\\" "\\\\" _zig_ccache_exe_escaped "${_zig_ccache_exe}")
     set(_zig_ccache_stmt "  *p++ = \"${_zig_ccache_exe_escaped}\";")
     math(EXPR _zig_extra_args_count "${_zig_extra_args_count} + 1")
   endif()
 
-  # Process target flags injection
+  # Inject target/cpu/extra flags
   if(inject_flags)
     foreach(_flag IN LISTS _zig_target_flags)
       string(REPLACE "\\" "\\\\" _flag_escaped "${_flag}")
@@ -181,14 +200,14 @@ function(_zig_generate_shim tool_name subcommand inject_flags use_ccache)
     endforeach()
   endif()
 
-  # Render C template
+  # Render C source from template
   string(CONFIGURE "${_zig_shim_template}" _shim_content @ONLY)
 
   set(_shim_src  "${_zig_shims_dir}/${tool_name}.c")
   set(_shim_exe  "${_zig_shims_dir}/${tool_name}${_zig_wrapper_ext}")
   set(_shim_hash "${_zig_shims_dir}/${tool_name}.hash")
 
-  # Avoid recompilation using MD5 hash check
+  # Skip recompilation when content is unchanged
   string(MD5 _new_hash "${_shim_content}")
   if(EXISTS "${_shim_hash}" AND EXISTS "${_shim_exe}")
     file(READ "${_shim_hash}" _old_hash)
@@ -212,15 +231,20 @@ function(_zig_generate_shim tool_name subcommand inject_flags use_ccache)
     ERROR_VARIABLE  _compile_stderr
     OUTPUT_QUIET
   )
+
   if(NOT _compile_result EQUAL 0)
     message(FATAL_ERROR
-      "Zig Toolchain: Failed to compile wrapper executable for '${tool_name}'.\n"
+      "Zig Toolchain: Failed to compile wrapper for '${tool_name}'.\n"
       "${_compile_stderr}"
     )
   endif()
 
   if(NOT CMAKE_HOST_WIN32)
-    execute_process(COMMAND chmod +x "${_shim_exe}" OUTPUT_QUIET)
+    execute_process(
+      COMMAND chmod +x "${_shim_exe}"
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
   endif()
 
   file(WRITE "${_shim_hash}" "${_new_hash}")
@@ -237,15 +261,15 @@ _zig_generate_shim("zig-strip"   "strip"   FALSE FALSE)
 
 set(CMAKE_C_COMPILER   "${_zig_shims_dir}/zig-cc${_zig_wrapper_ext}")
 set(CMAKE_CXX_COMPILER "${_zig_shims_dir}/zig-c++${_zig_wrapper_ext}")
-set(CMAKE_AR           "${_zig_shims_dir}/zig-ar${_zig_wrapper_ext}"      CACHE FILEPATH "Archiver" FORCE)
-set(CMAKE_RANLIB       "${_zig_shims_dir}/zig-ranlib${_zig_wrapper_ext}"  CACHE FILEPATH "Ranlib" FORCE)
-set(CMAKE_NM           "${_zig_shims_dir}/zig-nm${_zig_wrapper_ext}"      CACHE FILEPATH "NM" FORCE)
-set(CMAKE_OBJCOPY      "${_zig_shims_dir}/zig-objcopy${_zig_wrapper_ext}" CACHE FILEPATH "Objcopy" FORCE)
-set(CMAKE_STRIP        "${_zig_shims_dir}/zig-strip${_zig_wrapper_ext}"   CACHE FILEPATH "Strip" FORCE)
+set(CMAKE_AR           "${_zig_shims_dir}/zig-ar${_zig_wrapper_ext}"      CACHE FILEPATH "Archiver"          FORCE)
+set(CMAKE_RANLIB       "${_zig_shims_dir}/zig-ranlib${_zig_wrapper_ext}"  CACHE FILEPATH "Ranlib"            FORCE)
+set(CMAKE_NM           "${_zig_shims_dir}/zig-nm${_zig_wrapper_ext}"      CACHE FILEPATH "NM"                FORCE)
+set(CMAKE_OBJCOPY      "${_zig_shims_dir}/zig-objcopy${_zig_wrapper_ext}" CACHE FILEPATH "Objcopy"           FORCE)
+set(CMAKE_STRIP        "${_zig_shims_dir}/zig-strip${_zig_wrapper_ext}"   CACHE FILEPATH "Strip"             FORCE)
 
 if(CMAKE_HOST_WIN32)
   # Unsupported linker arg: --dependency-file. See https://github.com/ziglang/zig/issues/22213
-  set(CMAKE_C_LINKER_DEPFILE_SUPPORTED FALSE)
+  set(CMAKE_C_LINKER_DEPFILE_SUPPORTED   FALSE)
   set(CMAKE_CXX_LINKER_DEPFILE_SUPPORTED FALSE)
 endif()
 
@@ -255,6 +279,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
   set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> /fo <OBJECT> <SOURCE>")
 elseif(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   # Prevent CMake from searching for Xcode SDKs since Zig provides its own sysroot
-  set(CMAKE_OSX_SYSROOT "" CACHE PATH "Force empty sysroot for Zig" FORCE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "Force empty deployment target" FORCE)
+  set(CMAKE_OSX_SYSROOT           "" CACHE PATH   "Force empty sysroot for Zig"           FORCE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "Force empty deployment target for Zig" FORCE)
 endif()
