@@ -193,17 +193,42 @@ fn verify_binary_header(path: []const u8, os: std.Target.Os.Tag, arch: std.Targe
 }
 
 fn run_command(allocator: std.mem.Allocator, argv: []const []const u8) !void {
-    var child = std.process.Child.init(argv, allocator);
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Inherit;
-    const term = try child.spawnAndWait();
-    switch (term) {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .max_output_bytes = 10 * 1024 * 1024,
+    }) catch |err| {
+        std.debug.print("\n[CRITICAL] Failed to spawn command: {any}\n", .{err});
+        return err;
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    switch (result.term) {
         .Exited => |code| {
             if (code != 0) {
-                std.debug.print("Command failed with code {d}\n", .{code});
+                std.debug.print("\n" ++ "!" ** 60 ++ "\n", .{});
+                std.debug.print("[ERROR] Command failed with exit code {d}\n", .{code});
+
+                std.debug.print("COMMAND: ", .{});
+                for (argv) |arg| {
+                    std.debug.print("{s} ", .{arg});
+                }
+                std.debug.print("\n\n", .{});
+
+                if (result.stdout.len > 0) {
+                    std.debug.print("=== STDOUT ===\n{s}\n", .{result.stdout});
+                }
+                if (result.stderr.len > 0) {
+                    std.debug.print("=== STDERR ===\n{s}\n", .{result.stderr});
+                }
+                std.debug.print("!" ** 60 ++ "\n\n", .{});
                 return error.CommandFailed;
             }
         },
-        else => return error.CommandCrashed,
+        else => {
+            std.debug.print("\n[CRASH] Command terminated unexpectedly (Signal/Crash)\n", .{});
+            return error.CommandCrashed;
+        },
     }
 }
