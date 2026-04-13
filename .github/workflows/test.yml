@@ -28,14 +28,16 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} / Zig ${{ matrix.zig_version }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    continue-on-error: ${{ matrix.zig_version == 'master' }}
 
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        zig_version: ["0.14.1", "0.15.2"]
 
     steps:
       - name: Checkout code
@@ -44,7 +46,11 @@ jobs:
       - name: Set up Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: ${{ matrix.zig_version }}
+
+      - name: Get Zig version
+        id: zig-ver
+        run: echo "version=$(zig version)" >> $GITHUB_OUTPUT
 
       - name: Cache Zig dependencies
         uses: actions/cache@v4
@@ -53,7 +59,7 @@ jobs:
             ~/.cache/zig
             ~/AppData/Local/zig
             ~/Library/Caches/zig
-          key: ${{ runner.os }}-zig-deps-${{ hashFiles('.zigversion') }}
+          key: ${{ runner.os }}-zig-deps-${{ steps.zig-ver.outputs.version }}
           restore-keys: |
             ${{ runner.os }}-zig-deps-
 
