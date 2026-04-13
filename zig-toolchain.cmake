@@ -221,12 +221,18 @@ function(_zig_generate_shim tool_name subcommand inject_flags use_ccache)
   message(STATUS "Zig Toolchain: Compiling native wrapper for '${tool_name}'...")
 
   if(CMAKE_HOST_APPLE)
-    set(_shim_strip_flag "")
+    set(_shim_compile_cmd
+      "${_zig_compiler_exe}" cc -O2 -std=c11 -march=native -target native-macos
+        "${_shim_src}" -o "${_shim_exe}"
+    )
   else()
-    set(_shim_strip_flag "-s")
+    set(_shim_compile_cmd
+      "${_zig_compiler_exe}" cc -O2 -std=c11 -march=native -s
+        "${_shim_src}" -o "${_shim_exe}"
+    )
   endif()
   execute_process(
-    COMMAND "${_zig_compiler_exe}" cc -O2 ${_shim_strip_flag} "${_shim_src}" -o "${_shim_exe}"
+    COMMAND ${_shim_compile_cmd}
     RESULT_VARIABLE _compile_result
     ERROR_VARIABLE  _compile_stderr
     OUTPUT_QUIET
