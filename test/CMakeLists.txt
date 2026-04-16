@@ -25,10 +25,24 @@ target_include_directories(cxx_static_lib PUBLIC include)
 
 add_executable(c_app src/main.c)
 target_link_libraries(c_app c_shared_lib c_static_lib)
-add_executable(cxx_app src/main.cpp)
-target_link_libraries(cxx_app c_shared_lib c_static_lib cxx_shared_lib cxx_static_lib)
-
+target_compile_definitions(c_app PRIVATE
+  -DPROJECT_VERSION="${PROJECT_VERSION}"
+  -DBUILD_DATE="${BUILD_DATE}"
+  -DBUILD_COMPILER_ID="${CMAKE_C_COMPILER_ID}"
+  -DBUILD_COMPILER_VERSION="${CMAKE_C_COMPILER_VERSION}"
+)
 if(WIN32)
   target_sources(c_app PRIVATE resource.rc)
+endif()
+
+add_executable(cxx_app src/main.cpp)
+target_link_libraries(cxx_app c_shared_lib c_static_lib cxx_shared_lib cxx_static_lib)
+target_compile_definitions(cxx_app PRIVATE
+  -DPROJECT_VERSION="${PROJECT_VERSION}"
+  -DBUILD_DATE="${BUILD_DATE}"
+  -DBUILD_COMPILER_ID="${CMAKE_C_COMPILER_ID}"
+  -DBUILD_COMPILER_VERSION="${CMAKE_C_COMPILER_VERSION}"
+)
+if(WIN32)
   target_sources(cxx_app PRIVATE resource.rc)
 endif()
