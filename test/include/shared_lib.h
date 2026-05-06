@@ -22,7 +22,6 @@ EXPORT int add(int a, int b);
 #endif
 
 #ifdef __cplusplus
-
 namespace shared_lib {
 
 class EXPORT SharedLib {

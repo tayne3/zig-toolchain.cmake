@@ -3,7 +3,7 @@
 namespace shared_lib {
 
 int SharedLib::add(int a, int b) {
-    return a + b;
+    return ::add(a, b);
 }
 
 };  // namespace shared_lib

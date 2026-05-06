@@ -12,7 +12,6 @@ int sub(int a, int b);
 #endif
 
 #ifdef __cplusplus
-
 namespace static_lib {
 
 class StaticLib {
